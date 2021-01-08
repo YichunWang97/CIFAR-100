@@ -1,84 +1,110 @@
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
 import matplotlib
-import pickle
+import matplotlib.pyplot as plt
 import time
+import tarfile
 
-from sklearn.preprocessing import StandardScaler
-from sklearn.decomposition import PCA
-from sklearn.ensemble import RandomForestClassifier
+from tqdm import tqdm
+    
+def unpickle(file):
+    import pickle
+    with open(file, 'rb') as fo:
+        dict = pickle.load(fo, encoding='bytes')
+    return dict
+
+train = unpickle("./cifar-100-python/train")
+test = unpickle("./cifar-100-python/test")
+meta = unpickle("./cifar-100-python/meta")
+train.keys()
+
+#read data
+#train set
+train_data = train[b'data']
+train_fine_labels = train[b'fine_labels']
+train_coarse_labels = train[b'coarse_labels']
+
+#test set
+test_data = test[b'data']
+test_fine_labels = test[b'fine_labels']
+test_coarse_labels = test[b'coarse_labels']
+
+#0-1 normalization 
+train_data_01 = train_data/255
+test_data_01 = test_data/255
+
+#10k-fold &# knn within coarse labels
+from sklearn.model_selection import KFold
+from sklearn.neighbors import KNeighborsClassifier
+
+X = train_data_01
+y = np.array(train_coarse_labels)
+
+kf = KFold(n_splits=10)
+kf.get_n_splits(X)
+
+
+for train_index, test_index in kf.split(X):
+    X_train, X_test = X[train_index], X[test_index]
+    y_train, y_test = y[train_index], y[test_index]
+    for q in tqdm(range(6,14)):
+        t3 = time.time()
+        neigh_1 = KNeighborsClassifier(n_neighbors=q,n_jobs=-1)
+        neigh_1.fit(X_train,y_train)
+        predit_02=neigh_1.predict(test_data_01)
+        coarse_label_score = (predit_02 == test_coarse_labels).mean()
+        t4 = time.time()
+        print("q:",q,"\n""Accuracy:{:.2%}".format(coarse_label_score),"\n""Cost Time: ", t4-t3)
+
+cv1_rate = [24.58,24.84,24.36,24.39,24.37,24.65,24.47,24.36,24.49]
+cv2_rate = [24.73,24.42,24.52,24.54,24.60,24.61,24.51,24.29,24.31]
+cv3_rate = [24.40,24.34,24.27,24.52,24.38,24.06,24.08,23.99,24.01]
+cv4_rate = [24.42,24.55,24.55,24.62,24.42,24.27,24.47,24.34,24.50]
+cv5_rate = [24.57,24.58,24.64,24.70,24.56,24.52,24.51,24.34,24.38]
+cv6_rate = [24.46,24.49,24.37,24.71,24.39,24.53,24.53,24.30,24.55]
+cv7_rate = [24.51,24.53,24.66,24.56,24.36,24.48,24.50,24.63,24.65]
+cv8_rate = [24.46,24.68,24.50,24.30,24.44,24.52,24.26,24.42,24.29]
+cv9_rate = [24.60,24.67,24.55,24.57,24.66,24.32,24.50,24.18,24.08]
+cv10_rate = [24.48,24.53,24.58,24.42,24.26,24.20,24.02,24.02,24.21]
+k_value  = [6,7,8,9,10,11,12,13,14]
+plt.plot(k_value, cv1_rate, '.-', label='cv1_rate')
+plt.plot(k_value, cv2_rate, '.-', label='cv2_rate')
+plt.plot(k_value, cv3_rate, '.-', label='cv3_rate')
+plt.plot(k_value, cv4_rate, '.-', label='cv4_rate')
+plt.plot(k_value, cv5_rate, '.-', label='cv5_rate')
+plt.plot(k_value, cv6_rate, '.-', label='cv6_rate')
+plt.plot(k_value, cv7_rate, '.-', label='cv7_rate')
+plt.plot(k_value, cv8_rate, '.-', label='cv8_rate')
+plt.plot(k_value, cv9_rate, '.-', label='cv9_rate')
+plt.plot(k_value, cv10_rate, '.-', label='cv10_rate')
+
+plt.xticks(k_value) 
+plt.xlabel('k value') 
+plt.legend() 
+plt.show() 
+
+#knn
+t1 = time.time()
+neigh_1 = KNeighborsClassifier(n_neighbors=7 ,n_jobs=-1)
+neigh_1.fit(train_data_01,train_coarse_labels)
+predit_02=neigh_1.predict(test_data_01)
+coarse_label_score = (predit_02 == test_coarse_labels).mean()
+t2 = time.time()
+print("Accuracy:{:.2%}".format(coarse_label_score),"\n""Cost Time: ", t2-t1)
+
+# precision & recall
 from sklearn.metrics import classification_report
+print(classification_report(test_coarse_labels, predit_02))
+
+#confusion matrix
 from sklearn.metrics import confusion_matrix
 
-start = time.time()
-
-def unpickle(file):
-    with open(file, 'rb') as fo:
-        dict = pickle.load(fo, encoding='latin1')
-    return dict;
-
-def random_forest_classcifation(data_train_features, data_train_labels, data_test_features):
-    train = data_train_features
-    train_coarse_labels = data_train_labels
-    test = data_test_features
-    #test_coarse_labels = data_test.get('coarse_labels')
-
-    total = np.vstack((train, test))
-    total_image = total.reshape(-1,3,32,32)
-    total_image_gray = np.zeros(total_image.shape)
-    for i in range(0, total_image.shape[0]):
-        r = total_image[i][0]
-        g = total_image[i][1]
-        b = total_image[i][2]
-        grey = r*0.3+g*0.59+b*0.11
-        image_grey = [grey, grey, grey]
-        total_image_gray[i] = image_grey
-    total = total_image_gray.reshape(-1, 3072)
-
-    scaler_total = StandardScaler()
-    scaler_total.fit(total)
-    total = scaler_total.transform(total)
-
-    pca_total = PCA(n_components = 0.8)
-    total = pca_total.fit_transform(total)
-
-    train = total[0:50000,:]
-    test = total[50000:60000,:]
-
-    random_forest = RandomForestClassifier(
-        n_estimators = 600,
-        min_samples_split = 10,
-        min_samples_leaf = 1,
-        max_features = 'sqrt',
-        max_depth = 20,
-        bootstrap = False
-    )
-    random_forest.fit(train, train_coarse_labels)
-    return random_forest.predict(test)
-
-data_train = unpickle('./cifar-100-python/train')
-train = data_train.get('data')
-train_coarse_labels = data_train.get('coarse_labels')
-data_test = unpickle('./cifar-100-python/test')
-test = data_test.get('data')
-
-test_predict = random_forest_classcifation(train, train_coarse_labels, test)
-test_coarse_labels = data_test.get('coarse_labels')
-
-print("Random forest classification report for super class in Cifar-100")
-print(classification_report(test_coarse_labels, test_predict))
-
-def confusion_matrix_plot(y_text, y_predict):
-    matrix = confusion_matrix(y_text, y_predict)
+def confusion_matrix_plot(test_coarse_labels, y_predict):
+    matrix = confusion_matrix(test_coarse_labels, y_predict)
     plt.matshow(matrix)
     plt.colorbar()
     plt.ylabel('True label')
     plt.xlabel('Predicted label')
     return plt
 
-print("Random forest confusion matrix for super class in Cifar-100")
-confusion_matrix_plot(test_coarse_labels, test_predict).show()   
-
-print('Total running time', time.time() - start)
-
+confusion_matrix_plot(test_coarse_labels, predit_02).show()
