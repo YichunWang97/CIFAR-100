@@ -1,0 +1,198 @@
+import os
+import cv2
+import pickle
+import numpy as np
+import matplotlib.pyplot as plt
+%matplotlib inline
+import random
+import tensorflow as tf
+from tensorflow import keras
+from tensorflow.keras import layers, Sequential, datasets, optimizers
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+from tensorflow.keras import utils as np_utils
+from tensorflow.keras.layers import Conv2D, MaxPooling2D, ZeroPadding2D, GlobalAveragePooling2D, BatchNormalization,Dense, Dropout, Activation, Flatten
+
+def unpickle(file):
+    import pickle
+    with open(file, 'rb') as p:
+        dict = pickle.load(p, encoding='bytes')
+    return dict
+
+meta = unpickle("./cifar-100-python/meta")
+train = unpickle("./cifar-100-python/train")
+#test = unpickle("C:/Users/Administrator/Desktop/5318 Group/cifar-100-python/test")
+
+### Split training set
+from sklearn.model_selection import train_test_split
+
+train_x = train[b'data']
+train_y = train[b'coarse_labels'] # Use coarse_labels for classification
+#test_x = test[b'data']
+#test_y = test[b'coarse_labels']
+
+train_xs, test_xs= train_test_split(train_x, test_size=0.1, random_state=0, shuffle=True) # 10-kFold
+train_ys, test_ys= train_test_split(train_y, test_size=0.1, random_state=0, shuffle=True)
+
+### Transfer images into RGB
+train_x=train_x.reshape(-1,3,32,32)
+train_x=np.rollaxis(train_x, 1, 4)
+train_xs=train_xs.reshape(-1,3,32,32)
+train_xs=np.rollaxis(train_xs, 1, 4)
+test_xs=test_xs.reshape(-1,3,32,32)
+test_xs=np.rollaxis(test_xs, 1, 4)
+#test_x=test_x.reshape(-1,3,32,32)
+#test_x=np.rollaxis(test_x, 1, 4)
+
+### Picture conversion example
+index = 10
+img_gray = train_xs[index]
+plt.figure()
+plt.imshow(img_gray)
+
+### Data preprocessing by using Normalization
+def preprocess(x, y):
+    x = tf.cast(x, dtype=tf.float32) / 255.
+    y = tf.cast(y, dtype=tf.int32)
+    
+    return x, y
+
+### Build the dataset object
+train_db = tf.data.Dataset.from_tensor_slices((train_xs, train_ys))
+train_db = train_db.map(preprocess).batch(225) ## Pack bulk data into a batch
+test_db = tf.data.Dataset.from_tensor_slices((test_xs, test_ys))
+test_db = test_db.map(preprocess).batch(225)
+
+### Construct the first half of the convolutional network
+def convoluation(num): ## Convolational layer
+    return layers.Conv2D(num, kernel_size=[3, 3], padding="same", activation=tf.nn.relu)
+
+def pool(): ## Pooling layer
+    return layers.MaxPool2D(pool_size=[2, 2], strides=2, padding='same')
+
+def conv_combo(conv, num):
+    conv.add(convoluation(num))
+    conv.add(layers.Dropout(0.5)) ## Dropout prevent overfitting
+    conv.add(convoluation(num))
+    conv.add(pool())
+
+### Convolutional layer pipeline
+def conv_net(num1, num2, num3):
+
+    conv_net = Sequential() ## Build convolutional network object
+    
+    conv_combo(conv_net, num1)
+    conv_combo(conv_net, num2)
+    conv_combo(conv_net, num2)
+    conv_combo(conv_net, num3)
+    conv_combo(conv_net, num3)
+    
+    return conv_net
+
+### Custom Dense layer (Full-connected layer)
+def dense(num):
+    return layers.Dense(num, activation=tf.nn.relu)
+
+def fc_net(num1, num2, num3):
+    
+    fc_net = Sequential() ## Build full-connected network object
+    
+    dense(num1)
+    dense(num2)
+    dense(num3)
+    
+    return fc_net
+
+Conv_net = conv_net(64,128,256)
+Fc_net = fc_net(128,64,50)
+
+### Set the input tensor shape of the model
+Conv_net.build(input_shape=[None, 32, 32, 3])
+Fc_net.build(input_shape=[None, 256])
+optimizer = optimizers.Adam(lr=1e-4) ## Set up the optimizer by using Adam
+
+### Use one variable to represent the weights in the two models to facilitate subsequent weight updates
+variables = Conv_net.trainable_variables + Fc_net.trainable_variables
+
+### Combine convolutional network and fully connected network
+def fullConv():
+    out = Conv_net(x)
+    out = tf.reshape(out, [-1, 256]) ## Full-connected layer：[b, 256] => [b, 50]
+    logits = Fc_net(out)
+    
+    return out, logits
+
+from sklearn.metrics import classification_report
+from sklearn.metrics import precision_score
+from sklearn.metrics import recall_score
+from sklearn.metrics import confusion_matrix
+
+### Start training
+import time ## Time counting
+
+for epoch in range(50): ## 50 epochs in total
+    
+    cpu_start = time.time() ## Time start
+    
+    for step, (x,y) in enumerate(train_db):
+        with tf.GradientTape() as tape:
+            
+            out, logits = fullConv()
+            y_onehot = tf.one_hot(y, depth=256)
+        
+            ## Use cross entropy to calculate loss
+            loss = tf.losses.categorical_crossentropy(y_onehot, logits, from_logits=True)
+            loss = tf.reduce_mean(loss)
+        
+            grads = tape.gradient(loss, variables) ## Compute gradient
+            optimizer.apply_gradients(zip(grads, variables)) ## Gradient update
+        
+            if step %100 == 0:
+                print(epoch, step, 'loss:', float(loss)) ## Print the loss information
+    
+    ## Test: Test the accuracy of each data set after training
+    total_num = 0
+    total_correct = 0
+    
+    for x,y in test_db:
+      
+        out, logits = fullConv()
+        prob = tf.nn.softmax(logits, axis=1)
+        
+        ## Prediction
+        pred = tf.argmax(prob, axis=1) ## !!!The data returned is in int64 format!!!
+        pred = tf.cast(pred, dtype=tf.int32) ## Transfer: int64 => int32
+
+        ## Count the correct number
+        correct = tf.cast(tf.equal(pred, y), dtype=tf.int32)
+        correct_1 = tf.reduce_sum(correct) ## Correct data number
+
+        total_num += x.shape[0]
+        total_correct += int(correct_1)
+    
+    ## Accuracy
+    acc = total_correct / total_num
+    print(epoch, 'acc:', acc)
+    
+    ## Precision
+    prec = precision_score(y, pred, average='macro')
+    print('precision:', prec)
+    
+    ## Recall
+    recall = recall_score(y, pred, average='macro')
+    print('recall:', recall)
+    
+    ## Confusion matrix
+    def confusion_matrix_plot_1(y_text, y_predict):
+        matrix = confusion_matrix(y_text, y_predict)
+        plt.matshow(matrix)
+        plt.colorbar()
+        plt.ylabel('True label')
+        plt.xlabel('Predicted label')
+        
+        return plt
+    
+    ## Print out confusion matrix image
+    confusion_matrix_plot_1(y, pred).show()
+    
+    cpu_end = time.time()
+    print('time:', cpu_end - cpu_start) ## Time end
