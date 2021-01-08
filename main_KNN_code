@@ -1,0 +1,84 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib
+import pickle
+import time
+
+from sklearn.preprocessing import StandardScaler
+from sklearn.decomposition import PCA
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import classification_report
+from sklearn.metrics import confusion_matrix
+
+start = time.time()
+
+def unpickle(file):
+    with open(file, 'rb') as fo:
+        dict = pickle.load(fo, encoding='latin1')
+    return dict;
+
+def random_forest_classcifation(data_train_features, data_train_labels, data_test_features):
+    train = data_train_features
+    train_coarse_labels = data_train_labels
+    test = data_test_features
+    #test_coarse_labels = data_test.get('coarse_labels')
+
+    total = np.vstack((train, test))
+    total_image = total.reshape(-1,3,32,32)
+    total_image_gray = np.zeros(total_image.shape)
+    for i in range(0, total_image.shape[0]):
+        r = total_image[i][0]
+        g = total_image[i][1]
+        b = total_image[i][2]
+        grey = r*0.3+g*0.59+b*0.11
+        image_grey = [grey, grey, grey]
+        total_image_gray[i] = image_grey
+    total = total_image_gray.reshape(-1, 3072)
+
+    scaler_total = StandardScaler()
+    scaler_total.fit(total)
+    total = scaler_total.transform(total)
+
+    pca_total = PCA(n_components = 0.8)
+    total = pca_total.fit_transform(total)
+
+    train = total[0:50000,:]
+    test = total[50000:60000,:]
+
+    random_forest = RandomForestClassifier(
+        n_estimators = 600,
+        min_samples_split = 10,
+        min_samples_leaf = 1,
+        max_features = 'sqrt',
+        max_depth = 20,
+        bootstrap = False
+    )
+    random_forest.fit(train, train_coarse_labels)
+    return random_forest.predict(test)
+
+data_train = unpickle('./cifar-100-python/train')
+train = data_train.get('data')
+train_coarse_labels = data_train.get('coarse_labels')
+data_test = unpickle('./cifar-100-python/test')
+test = data_test.get('data')
+
+test_predict = random_forest_classcifation(train, train_coarse_labels, test)
+test_coarse_labels = data_test.get('coarse_labels')
+
+print("Random forest classification report for super class in Cifar-100")
+print(classification_report(test_coarse_labels, test_predict))
+
+def confusion_matrix_plot(y_text, y_predict):
+    matrix = confusion_matrix(y_text, y_predict)
+    plt.matshow(matrix)
+    plt.colorbar()
+    plt.ylabel('True label')
+    plt.xlabel('Predicted label')
+    return plt
+
+print("Random forest confusion matrix for super class in Cifar-100")
+confusion_matrix_plot(test_coarse_labels, test_predict).show()   
+
+print('Total running time', time.time() - start)
+
