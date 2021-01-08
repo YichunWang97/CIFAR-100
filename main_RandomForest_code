@@ -1,0 +1,105 @@
+import pickle
+import pandas as pd
+import numpy as np
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+from sklearn.decomposition import PCA
+
+#Unpickle file
+def unpickle(file):
+    with open(file, 'rb') as fo:
+        dict = pickle.load(fo, encoding='latin1')
+    return dict;
+
+data_train = unpickle('./cifar-100-python/train')
+train = data_train.get('data')
+train_coarse_labels = data_train.get('coarse_labels')
+
+#Grayscale preprocessing
+train_image = train.reshape(-1,3,32,32)
+train_image_gray = np.zeros(train_image.shape)
+for i in range(0, train_image.shape[0]):
+    r = train_image[i][0]
+    g = train_image[i][1]
+    b = train_image[i][2]
+    grey = r*0.3+g*0.59+b*0.11
+    image_grey = [grey, grey, grey]
+    train_image_gray[i] = image_grey
+train = train_image_gray.reshape(-1, 3072)
+
+train = pd.DataFrame(train)
+train_coarse_labels = pd.DataFrame(train_coarse_labels)
+
+#Standardization
+scaler = StandardScaler()
+scaler.fit(train)
+train = scaler.transform(trSain)
+
+#Principal component analysis
+pca = PCA(n_components = 0.8)
+train = pca.fit_transform(train)
+
+#Split data set
+x_train, x_test, y_train, y_test = train_test_split(train, train_coarse_labels[0], test_size = 0.2)
+x_train.shape
+
+from sklearn.model_selection import RandomizedSearchCV
+from sklearn.ensemble import RandomForestClassifier
+
+#Use RandomizedSearchCV to find parameters for the random forest algorithm (including 10 cross-validation)
+n_estimators = [int(x) for x in np.linspace(start = 600, stop = 1000, num = 5)]
+max_features = ['auto', 'sqrt']
+max_depth = [int(x) for x in np.linspace(6, 20, num = 15)]
+max_depth.append(None)
+min_samples_split = [2, 5, 10]
+min_samples_leaf = [1, 2, 4]
+bootstrap = [True, False]
+
+random_grid = {'n_estimators': n_estimators,
+               'max_features': max_features,
+               'max_depth': max_depth,
+               'min_samples_split': min_samples_split,
+               'min_samples_leaf': min_samples_leaf,
+               'bootstrap': bootstrap
+              }
+
+rf_coarse = RandomForestClassifier()
+rf_random_coarse = RandomizedSearchCV(
+    estimator = rf_coarse, 
+    param_distributions = random_grid,
+    n_iter = 20,
+    scoring = 'accuracy', 
+    cv = 10,
+    verbose = 2,
+    n_jobs = -1
+)
+rf_random_coarse.fit(x_train, y_train)
+
+#The best parameters of random forest
+rf_random_coarse.best_params_
+
+#Get the best classifier
+rfc_coarse = rf_random_coarse.best_estimator_
+rfc_coarse.fit(x_train, y_train)
+
+from sklearn.metrics import classification_report
+
+#Generate classification_report for random forest
+print("Random forest classification report for super class in Cifar-100")
+print(classification_report(y_test, rfc_coarse.predict(x_test)))
+
+from sklearn.metrics import confusion_matrix
+import matplotlib.pyplot as plt
+import matplotlib
+
+#Generate confusion matrix for random forest
+def confusion_matrix_plot(y_text, y_predict):
+    matrix = confusion_matrix(y_text, y_predict)
+    plt.matshow(matrix)
+    plt.colorbar()
+    plt.ylabel('True label')
+    plt.xlabel('Predicted label')
+    return plt
+
+print("Random forest confusion matrix for super class in Cifar-100")
+confusion_matrix_plot(y_test, rfc_coarse.predict(x_test)).show()
