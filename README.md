@@ -7,3 +7,10 @@
 ###关联
 ###University of Sydney
 ###COMP5318
+###Machine Learning and Data Mining
+###CNN
+###KNN
+###Random Forest
+
+#存在问题
+Confusion Matrices存在问题，待解决
